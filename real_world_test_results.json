@@ -1,0 +1,51 @@
+{
+  "original_pattern": "I- NYC AA X/ORD UA X/DEN AS SEA 250.00 // YVR AC X/YYZ Q25.00 BA LON Q50.00 AF X/CDG LH FRA 500.00 NUC 825.00 END ROE 1.25",
+  "cleaned_pattern": "I- NYC AA X/ ORD UA X/ DEN AS SEA 250.00 // YVR AC X/ YYZ Q25.00 BA LON Q50.00 AF X/ CDG LH FRA 500.00 NUC 825.00 END ROE 1.25",
+  "is_valid": true,
+  "garbage_tokens": [],
+  "spacing_issues": [
+    "Token 'X/ORD' was split into ['X/', 'ORD']",
+    "Token 'X/DEN' was split into ['X/', 'DEN']",
+    "Token 'X/YYZ' was split into ['X/', 'YYZ']",
+    "Token 'X/CDG' was split into ['X/', 'CDG']"
+  ],
+  "journey_validation": {
+    "is_valid": true,
+    "message": "Valid pattern",
+    "journey_segments": [
+      "NYC AA X/ ORD UA X/ DEN AS SEA",
+      "// YVR AC X/ YYZ BA LON AF X/ CDG LH FRA"
+    ],
+    "journey_fares": [
+      250.0,
+      500.0
+    ],
+    "q_surcharges": [
+      25.0,
+      50.0
+    ],
+    "total_fare": 750.0,
+    "total_q_surcharge": 75.0,
+    "calculated_fare": 825.0,
+    "fare_value": 825.0,
+    "currency_code": "NUC",
+    "is_fare_match": true,
+    "is_valid_journey": true,
+    "has_roe": true,
+    "roe_value": 1.25,
+    "has_invol": true
+  },
+  "fare_calculation": {
+    "journey_fares": [
+      250.0,
+      500.0
+    ],
+    "q_surcharge": 75.0,
+    "total_journey_fare": 750.0,
+    "currency_code": "NUC",
+    "calculated_fare_total": 825.0,
+    "expected_fare": 825.0,
+    "is_fare_match": true,
+    "roe_value": 1.25
+  }
+}
