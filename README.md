@@ -77,6 +77,34 @@ print(f"Calculated fare total: {result['fare_calculation']['calculated_fare_tota
    pip install -r requirements.txt
    ```
 
+## Deployment
+
+### Local Deployment
+
+To run the Streamlit app locally:
+
+```bash
+streamlit run streamlit_app.py
+```
+
+### Streamlit Cloud Deployment
+
+1. Push your code to GitHub
+2. Connect your GitHub repository to Streamlit Cloud
+3. Deploy the app using `streamlit_app.py` as the main file
+
+### Troubleshooting Deployment Issues
+
+If you encounter issues with missing dependencies during deployment:
+
+1. Ensure all required packages are listed in `requirements.txt`
+2. Run the deployment script to check for missing dependencies:
+   ```bash
+   python deployment.py
+   ```
+3. Check the logs for any error messages
+4. Make sure the Python version specified in `runtime.txt` is supported by your deployment platform
+
 ## Testing
 
 Run the test suite to verify functionality:
