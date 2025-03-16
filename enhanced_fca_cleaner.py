@@ -937,7 +937,7 @@ def analyze_pattern(pattern):
     Analyze a fare calculation pattern and return detailed information
     
     Args:
-        pattern (str): The fare calculation pattern to analyze
+        pattern (str): The fare calculation pattern
         
     Returns:
         dict: Dictionary with analysis results
@@ -994,28 +994,27 @@ def analyze_pattern(pattern):
     total_journey_fare, q_surcharge_total, fare_total, expected_fare, currency_code, _ = calculate_fare_total(cleaned_pattern, journey_validation_temp)
     
     # Always auto-correct fare total to include Q surcharges
-    if expected_fare is not None and q_surcharge_total > 0:
-        # Check if the expected fare doesn't include Q surcharges
-        if abs(total_journey_fare - expected_fare) < 0.01:
-            # Auto-correct the fare total to include Q surcharges
-            corrected_fare = total_journey_fare + q_surcharge_total
+    if expected_fare is not None:
+        # Always update the fare total to include Q surcharges
+        corrected_fare = total_journey_fare + q_surcharge_total
+        
+        # Update the NUC amount in cleaned_pattern
+        if currency_code:
+            # Find the pattern like "NUC 750.00" and replace with corrected value
+            cleaned_pattern = re.sub(
+                rf"{currency_code}\s+\d+\.\d{{2}}", 
+                f"{currency_code} {corrected_fare:.2f}", 
+                cleaned_pattern
+            )
             
-            # Update the NUC amount in cleaned_pattern
-            if currency_code:
-                # Find the pattern like "NUC 750.00" and replace with corrected value
-                cleaned_pattern = re.sub(
-                    rf"{currency_code}\s+(\d+\.\d{{2}})", 
-                    f"{currency_code} {corrected_fare:.2f}", 
-                    cleaned_pattern
-                )
-                
-                # Also update the original pattern
-                original_pattern = re.sub(
-                    rf"{currency_code}\s+(\d+\.\d{{2}})", 
-                    f"{currency_code} {corrected_fare:.2f}", 
-                    original_pattern
-                )
-                
+            # Also update the original pattern
+            original_pattern = re.sub(
+                rf"{currency_code}\s+\d+\.\d{{2}}", 
+                f"{currency_code} {corrected_fare:.2f}", 
+                original_pattern
+            )
+            
+            if abs(expected_fare - corrected_fare) > 0.01:
                 print(f"Auto-corrected fare total from {expected_fare:.2f} to {corrected_fare:.2f} (including Q surcharges)")
     
     # Now validate the pattern structure with potentially corrected fare
@@ -1031,35 +1030,25 @@ def analyze_pattern(pattern):
         roe_value = float(roe_match.group(1))
     
     # Determine if the pattern is valid
-    is_valid = journey_validation.get('is_valid', False)
+    is_valid = journey_validation.get('is_valid', False) and is_fare_match
     
-    # Check for fare mismatch warning
-    fare_mismatch_warning = journey_validation.get('fare_mismatch_warning', None)
-    
-    # Create the analysis result
+    # Prepare the result dictionary
     result = {
-        'original_pattern': original_pattern,  # Ensure we preserve the original pattern
-        'cleaned_pattern': cleaned_pattern,
         'is_valid': is_valid,
+        'original_pattern': original_pattern,
+        'cleaned_pattern': cleaned_pattern,
         'garbage_tokens': garbage_tokens,
         'spacing_issues': spacing_issues,
-        'journey_validation': journey_validation,
         'fare_calculation': {
             'journey_fares': journey_validation.get('journey_fares', []),
             'q_surcharge': q_surcharge_total,
             'total_journey_fare': total_journey_fare,
-            'currency_code': currency_code,
-            'calculated_fare_total': fare_total,
             'expected_fare': expected_fare,
-            'is_fare_match': is_fare_match,
-            'roe_value': roe_value
+            'calculated_fare_total': fare_total,
+            'roe_value': roe_value,
+            'currency_code': currency_code
         }
     }
-    
-    # Add fare mismatch warning if applicable
-    if fare_mismatch_warning:
-        result['fare_mismatch_warning'] = fare_mismatch_warning
-        result['fare_calculation']['fare_mismatch_warning'] = fare_mismatch_warning
     
     return result
 
