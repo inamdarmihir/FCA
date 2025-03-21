@@ -62,41 +62,36 @@ def is_valid_token(token):
     Returns:
         tuple: (is_valid, token_type)
     """
+    # Ensure token is a string
+    token = str(token)
+    
+    # Check for airport code (e.g. JFK, SFO, LAX)
+    if token in AIRPORT_CODES:
+        return True, "AIRPORT"
+    
+    # Check for airline code (e.g. DL, AA, UA)
+    if token in AIRLINE_CODES:
+        return True, "AIRLINE"
+    
+    # Check for fare amount (e.g. 100.00)
+    if re.match(r'^\d+(\.\d+)?$', token):
+        return True, "FARE"
+    
     # Check if token is a fare amount with M prefix (mileage fare, e.g. M123.45)
     if re.match(r'^M\d+(\.\d+)?$', token):
         return True, "MILEAGE_FARE"
     
-    # Check if token is a fare amount (e.g. 123.45)
-    if re.match(r'^\d+(\.\d+)?$', token):
-        return True, "FARE"
+    # Check if token is a Q surcharge (e.g. Q10.00)
+    if re.match(r'^Q\d+(\.\d+)?$', token):
+        return True, "Q_SURCHARGE"
+    
+    # Check if token is a plus up amount (e.g. P10.00)
+    if re.match(r'^P\d+(\.\d+)?$', token):
+        return True, "PLUS_UP"
     
     # Check if token is a class differential (e.g. D10.00)
     if re.match(r'^D\d+(\.\d+)?$', token):
         return True, "CLASS_DIFFERENTIAL"
-    
-    # Side trip indicators (parentheses)
-    if token in ["(", ")"]:
-        return True, "SIDE_TRIP_INDICATOR"
-    
-    # Tour indicators
-    if token in ["M/BT", "M/IT"]:
-        return True, "TOUR_INDICATOR"
-    
-    # Plus up indicator
-    if token == "P":
-        return True, "PLUS_UP_INDICATOR"
-    
-    # Numeric token
-    if token.isdigit():
-        return True, "NUMERIC"
-    
-    # Check if token is a valid airport code (e.g. LON, NYC)
-    if re.match(r'^[A-Z]{3}$', token):
-        return True, "AIRPORT"
-    
-    # Check if token is a valid airline code (e.g. BA, AA)
-    if re.match(r'^[A-Z0-9]{2}$', token):
-        return True, "AIRLINE"
     
     # Check if token is a valid currency code (e.g. USD, GBP)
     if re.match(r'^[A-Z]{3}$', token):
@@ -123,6 +118,14 @@ def is_valid_token(token):
     directions = ["LH", "AP", "AT", "EH"]
     if token in directions:
         return True, "DIRECTION"
+    
+    # Check for tour indicators
+    if token in ["M/BT", "M/IT"]:
+        return True, "TOUR_INDICATOR"
+    
+    # Check for side trip indicators
+    if token in ["(", ")"]:
+        return True, "SIDE_TRIP_INDICATOR"
     
     # If none of the above, token is invalid
     return False, None
@@ -1335,6 +1338,18 @@ def clean_pattern(pattern):
     for token in tokens:
         # Try to split concatenated tokens
         split_tokens = split_concatenated_tokens(token)
+        
+        # Ensure split_tokens is a list of strings, not a list containing lists
+        if isinstance(split_tokens, list):
+            # If split_tokens contains any list elements, flatten them
+            flattened_tokens = []
+            for item in split_tokens:
+                if isinstance(item, list):
+                    flattened_tokens.extend(item)
+                else:
+                    flattened_tokens.append(item)
+            split_tokens = flattened_tokens
+        
         if len(split_tokens) > 1:
             expanded_tokens.extend(split_tokens)
             concatenated_fixes.append((token, split_tokens))
@@ -1379,6 +1394,9 @@ def clean_pattern(pattern):
                             new_tokens.append(next_token)
                             i += 1  # Skip the next token as we've already added it
                 i += 1
+        
+        # Ensure all tokens are strings before joining
+        new_tokens = [str(token) for token in new_tokens]
         
         # Rejoin tokens
         expanded_pattern = ' '.join(new_tokens)
@@ -1426,6 +1444,9 @@ def clean_pattern(pattern):
         if tokens[i] in ["M/BT", "M/IT"] and tokens[i] not in valid_tokens:
             valid_tokens.append(tokens[i])
     
+    # Ensure all tokens are strings before joining
+    valid_tokens = [str(token) for token in valid_tokens]
+    
     # Reconstruct the pattern
     cleaned_pattern = ' '.join(valid_tokens)
     
@@ -1437,38 +1458,24 @@ def clean_pattern(pattern):
     original_tokens = original.split()
     cleaned_tokens = cleaned_pattern.split()
     
+    # Identify tokens that were removed as garbage
+    garbage_tokens = []
+    for token in original_tokens:
+        if token not in cleaned_tokens and token.strip():
+            # Check if this token was split into multiple tokens
+            was_split = False
+            for orig, split in concatenated_fixes:
+                if orig == token:
+                    was_split = True
+                    break
+            if not was_split:
+                garbage_tokens.append(token)
+    
     # Check for spacing issues
     spacing_issues = []
     if concatenated_fixes:
         for original_token, split_tokens in concatenated_fixes:
             spacing_issues.append(f"Token '{original_token}' was split into {split_tokens}")
-    
-    # Check for valid combinations that were applied
-    if valid_combinations:
-        for start, end, combined, token_type in valid_combinations:
-            if end > start:
-                original_segment = ' '.join(expanded_tokens[start:end+1])
-                spacing_issues.append(f"Tokens '{original_segment}' were combined into '{combined}'")
-    
-    # Identify garbage tokens
-    garbage_tokens = []
-    for token in original_tokens:
-        # Skip tokens that were split due to concatenation
-        is_concatenated = False
-        for original_token, _ in concatenated_fixes:
-            if token == original_token:
-                is_concatenated = True
-                break
-        
-        if is_concatenated:
-            continue
-        
-        # Check if token is in the cleaned pattern
-        is_valid, _ = is_valid_token(token)
-        if not is_valid and token not in cleaned_tokens:
-            # Skip tour indicators and parentheses - they should not be marked as garbage
-            if token not in ["M/BT", "M/IT", "(", ")"]:
-                garbage_tokens.append(token)
     
     return cleaned_pattern, garbage_tokens, spacing_issues
 
@@ -1612,41 +1619,20 @@ def reconstruct_valid_pattern(tokens):
 
 def analyze_pattern(pattern):
     """
-    Analyze a fare calculation pattern and return detailed information
+    Analyze a fare calculation pattern for validity and structure.
     
     Args:
-        pattern (str): The fare calculation pattern
-        
+        pattern (str): The fare calculation pattern to analyze
+    
     Returns:
-        dict: Dictionary with analysis results
+        dict: A dictionary with analysis results
     """
+    # Store the original pattern for reference
+    original_pattern = pattern
+    
     try:
-        # Original pattern
-        original_pattern = pattern
-        
-        # Remove FP to /FP or /FC segments at the beginning if present
-        if pattern.startswith("FP"):
-            fp_end_idx = pattern.find("/FP")
-            fc_end_idx = pattern.find("/FC")
-            
-            # Determine which marker exists and comes first (/FP or /FC)
-            if fp_end_idx != -1 and (fc_end_idx == -1 or fp_end_idx < fc_end_idx):
-                pattern = pattern[fp_end_idx + 3:].strip()  # +3 to skip "/FP"
-            elif fc_end_idx != -1:
-                pattern = pattern[fc_end_idx + 3:].strip()  # +3 to skip "/FC"
-                
-            # Check for date pattern like 19MAR after the FP segment
-            tokens = pattern.split()
-            if tokens and re.match(r'^(\d{1,2}[A-Z]{3})$', tokens[0]):
-                pattern = ' '.join(tokens[1:])  # Remove the date token
-        
-        # Remove any special markers that might be in the pattern
-        if ":" in pattern:
-            pattern = pattern.split(":")[0].strip()
-        
-        # Remove @Web marker from the original pattern (no longer needed)
-        if "@Web" in pattern:
-            pattern = pattern.replace("@Web", "").strip()
+        # Remove leading/trailing whitespace
+        pattern = pattern.strip()
         
         # Check if pattern has an involuntary journey change indicator (I-)
         # Only preserve I- if it's already in the pattern, don't add it otherwise
@@ -1738,7 +1724,28 @@ def analyze_pattern(pattern):
         import traceback
         print(f"Exception in analyze_pattern: {e}")
         print(traceback.format_exc())
-        return {'is_valid': False, 'error': str(e)}
+        # Return a valid result dictionary with error information
+        return {
+            'is_valid': False,
+            'original_pattern': original_pattern,
+            'cleaned_pattern': original_pattern,  # Use original as fallback
+            'garbage_tokens': [],
+            'spacing_issues': [],
+            'error': str(e),
+            'fare_calculation': {
+                'journey_fares': [],
+                'q_surcharge': 0.0,
+                'class_differential': 0.0,
+                'plus_up': 0.0,
+                'tour_indicators': [],
+                'side_trips': [],
+                'total_journey_fare': 0.0,
+                'expected_fare': None,
+                'calculated_fare_total': 0.0,
+                'roe_value': None,
+                'currency_code': None
+            }
+        }
 
 if __name__ == "__main__":
     # Test with the problematic pattern

@@ -82,6 +82,12 @@ with st.sidebar:
 # Main content
 st.header("Pattern Analysis")
 
+# Initialize session state for pattern_input if it doesn't exist
+if 'pattern_input' not in st.session_state:
+    st.session_state.pattern_input = ""
+if 'last_pattern' not in st.session_state:
+    st.session_state.last_pattern = ""
+
 # Example patterns section
 st.subheader("Example Patterns")
 st.markdown("Click on any example to try it out:")
@@ -116,7 +122,6 @@ with col1:
     for i, (description, pattern) in enumerate(example_items[:items_per_column]):
         if st.button(f"Example {i+1}: {description}", key=f"example_{i+1}"):
             st.session_state.pattern_input = pattern
-            st.experimental_rerun()
 
 # Second column
 with col2:
@@ -124,7 +129,6 @@ with col2:
         idx = i + items_per_column + 1
         if st.button(f"Example {idx}: {description}", key=f"example_{idx}"):
             st.session_state.pattern_input = pattern
-            st.experimental_rerun()
 
 # Third column
 with col3:
@@ -132,7 +136,11 @@ with col3:
         idx = i + 2*items_per_column + 1
         if st.button(f"Example {idx}: {description}", key=f"example_{idx}"):
             st.session_state.pattern_input = pattern
-            st.experimental_rerun()
+
+# Display status message when example is selected
+if st.session_state.pattern_input != st.session_state.last_pattern and st.session_state.pattern_input != "":
+    st.success("Example pattern selected! Scroll down to analyze it or modify it in the text area below.")
+    st.session_state.last_pattern = st.session_state.pattern_input
 
 # Explanation of pattern types
 with st.expander("Learn more about pattern types"):
