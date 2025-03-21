@@ -42,7 +42,7 @@ CURRENCY_CODES = [
 ]
 
 # Special tokens that need to be preserved
-SPECIAL_TOKENS = ["NUC", "END", "ROE", "Q", "//", "/-", "X/", "I-"] + CURRENCY_CODES
+SPECIAL_TOKENS = ["NUC", "END", "ROE", "Q", "//", "/-", "X/", "I-", "M/BT", "M/IT", "+", "PU", "P", "(", ")"] + CURRENCY_CODES
 
 for code in COMMON_AIRPORTS:
     if code not in AIRPORT_CODES:
@@ -53,63 +53,157 @@ for code in COMMON_AIRLINES:
         AIRLINE_CODES.append(code)
 
 def is_valid_token(token):
-    """Check if a token is a valid airport code, airline code, or numeric value"""
-    # Check if it's a valid airport code
-    if token in AIRPORT_CODES:
-        return True, "AIRPORT"
+    """
+    Check if a token is valid in a fare calculation pattern
     
-    # Check if it's a valid airline code
-    if token in AIRLINE_CODES:
-        return True, "AIRLINE"
+    Args:
+        token (str): The token to check
+        
+    Returns:
+        tuple: (is_valid, token_type)
+    """
+    # Check if token is a fare amount with M prefix (mileage fare, e.g. M123.45)
+    if re.match(r'^M\d+(\.\d+)?$', token):
+        return True, "MILEAGE_FARE"
     
-    # Check if it's a numeric value (fare amount)
-    if re.match(r'^\d+\.\d{2}$', token):
+    # Check if token is a fare amount (e.g. 123.45)
+    if re.match(r'^\d+(\.\d+)?$', token):
         return True, "FARE"
     
-    # Check if it's a numeric value with any number of decimal places (for ROE)
-    if re.match(r'^\d+\.\d+$', token):
+    # Check if token is a class differential (e.g. D10.00)
+    if re.match(r'^D\d+(\.\d+)?$', token):
+        return True, "CLASS_DIFFERENTIAL"
+    
+    # Side trip indicators (parentheses)
+    if token in ["(", ")"]:
+        return True, "SIDE_TRIP_INDICATOR"
+    
+    # Tour indicators
+    if token in ["M/BT", "M/IT"]:
+        return True, "TOUR_INDICATOR"
+    
+    # Plus up indicator
+    if token == "P":
+        return True, "PLUS_UP_INDICATOR"
+    
+    # Numeric token
+    if token.isdigit():
         return True, "NUMERIC"
     
-    # Check if it's a surface segment indicator
-    if token in ["//", "/-"]:
-        return True, "SURFACE"
+    # Check if token is a valid airport code (e.g. LON, NYC)
+    if re.match(r'^[A-Z]{3}$', token):
+        return True, "AIRPORT"
     
-    # Check if it's a transit indicator
-    if token == "X/":
-        return True, "TRANSIT"
+    # Check if token is a valid airline code (e.g. BA, AA)
+    if re.match(r'^[A-Z0-9]{2}$', token):
+        return True, "AIRLINE"
     
-    # Check if it's an involuntary journey change indicator
-    if token == "I-":
-        return True, "INVOL"
+    # Check if token is a valid currency code (e.g. USD, GBP)
+    if re.match(r'^[A-Z]{3}$', token):
+        return True, "CURRENCY"
     
-    # Check if it's one of the special tokens (case insensitive for currency codes)
-    if token in SPECIAL_TOKENS or token.upper() in SPECIAL_TOKENS:
-        return True, "SPECIAL"
+    # Check for valid keywords
+    keywords = [
+        "X/", "O/", "Q", "NUC", "END", "/-",
+        "FARE", "TX", "XF", "XT", "YQ", "YR"
+    ]
     
-    # Check if it's a Q surcharge (e.g., Q10.00)
-    if re.match(r'^Q\d+\.\d{2}$', token):
-        return True, "Q_SURCHARGE"
+    if token in keywords:
+        return True, "KEYWORD"
     
-    # Check if it's a ROE value (e.g., ROE1.00)
-    if re.match(r'^ROE\d+\.\d+$', token):
-        return True, "ROE_VALUE"
+    # Check for ROE value (e.g. ROE1.25)
+    if re.match(r'^ROE\d+(\.\d+)?$', token):
+        return True, "ROE"
     
-    return False, "INVALID"
+    # Check for concatenated tokens with ROE
+    if "ROE" in token:
+        return True, "ROE_CONCATENATED"
+    
+    # Is a direction (e.g. LH, AP, AT, EH)
+    directions = ["LH", "AP", "AT", "EH"]
+    if token in directions:
+        return True, "DIRECTION"
+    
+    # If none of the above, token is invalid
+    return False, None
 
 def split_concatenated_tokens(token):
     """
-    Split a token that might be multiple valid tokens concatenated together
+    Split a token that may contain multiple concatenated tokens
     
     Args:
         token (str): The token to split
         
     Returns:
-        list: List of valid tokens found, or empty list if no valid split found
+        list: The split tokens
     """
-    # If the token is already valid, return it as is
-    is_valid, token_type = is_valid_token(token)
-    if is_valid:
+    # Special handling for tour indicators (M/BT, M/IT)
+    if token == "M/BT" or token == "M/IT":
         return [token]
+    
+    # Special handling for plus up indicator (P)
+    if token == "P":
+        return [token]
+    
+    # Special handling for parentheses (side trip indicators)
+    if token == "(" or token == ")":
+        return [token]
+    
+    # Handle case where a token starts with "(" or ends with ")"
+    if token.startswith("(") and len(token) > 1:
+        remainder = token[1:].strip()
+        if remainder:
+            return ["("] + split_concatenated_tokens(remainder)
+        return ["("]
+    
+    if token.endswith(")") and len(token) > 1:
+        remainder = token[:-1].strip()
+        if remainder:
+            return split_concatenated_tokens(remainder) + [")"]
+        return [")"]
+    
+    # Handle case where a token starts with M/BT or M/IT
+    if token.startswith("M/BT"):
+        remainder = token[4:].strip()
+        if remainder:
+            return ["M/BT"] + split_concatenated_tokens(remainder)
+        return ["M/BT"]
+    
+    if token.startswith("M/IT"):
+        remainder = token[4:].strip()
+        if remainder:
+            return ["M/IT"] + split_concatenated_tokens(remainder)
+        return ["M/IT"]
+    
+    # ROE value (e.g., ROE1.0)
+    if token.startswith("ROE") and re.search(r'\d', token):
+        return [token]
+    
+    # Class differential pattern (e.g., D100.00)
+    if token.startswith("D") and re.match(r'^D\d+(\.\d+)?$', token):
+        return [token]
+    
+    # Mileage fare pattern (e.g., M100.00)
+    if token.startswith("M") and re.match(r'^M\d+(\.\d+)?$', token):
+        return [token]
+
+    # Plus up pattern (e.g., P100.00)
+    if token.startswith("P") and re.match(r'^P\d+(\.\d+)?$', token):
+        return [token]
+    
+    # Q surcharge with value (e.g., Q20.00)
+    if token.startswith("Q") and len(token) > 1 and token[1:].replace('.', '', 1).isdigit():
+        return ["Q", token[1:]]
+    
+    # Transit indicator (X/) followed by something
+    if token.startswith("X/"):
+        remainder = token[2:].strip()
+        if remainder:
+            if remainder in AIRPORT_CODES:
+                return ["X/", remainder]
+            else:
+                return ["X/"] + split_concatenated_tokens(remainder)
+        return ["X/"]
     
     # Special case for fare amounts concatenated with special tokens
     # Check for patterns like "1000.00END" or "1000.00NUC"
@@ -125,19 +219,17 @@ def split_concatenated_tokens(token):
     if q_surcharge_match:
         return ["Q", q_surcharge_match.group(1)]
     
+    # Special case for P plus ups
+    # Check for patterns like "P10.00"
+    p_plusup_match = re.match(r'^P(\d+\.\d{2})$', token)
+    if p_plusup_match:
+        return ["P", p_plusup_match.group(1)]
+    
     # Special case for ROE values
     # Check for patterns like "ROE1.00"
     roe_match = re.match(r'^ROE(\d+\.\d{2})$', token)
     if roe_match:
         return ["ROE", roe_match.group(1)]
-    
-    # Special case for transit indicators
-    # Check for patterns like "X/DOH"
-    transit_match = re.match(r'^X/([A-Z]{3})$', token)
-    if transit_match:
-        airport = transit_match.group(1)
-        if airport in AIRPORT_CODES:
-            return ["X/", airport]
     
     # Special case for involuntary journey change indicators
     # Check for patterns like "I-LON"
@@ -531,48 +623,87 @@ def validate_pattern_structure(pattern):
     if len(tokens) < 3:
         return {'is_valid': False, 'message': "Pattern is too short"}
     
-    # Check for currency code and END tokens
-    currency_code = None
-    for curr in ["NUC", "GBP", "INR", "USD", "EUR", "AUD", "CAD", "JPY", "SGD"]:
-        if curr in tokens or curr.lower() in tokens:
-            currency_code = curr
-            break
-    
-    if currency_code is None:
-        return {'is_valid': False, 'message': "Missing currency code token"}
-    
+    # Check for END token (required in all patterns)
     if "END" not in tokens:
         return {'is_valid': False, 'message': "Missing END token"}
     
-    # Check for ROE value after END
-    has_roe = False
-    roe_value = None
-    end_index = tokens.index("END")
-    if end_index + 2 < len(tokens) and tokens[end_index + 1] == "ROE":
-        # Check if the ROE value is valid (allow any number of decimal places)
-        if re.match(r'^\d+\.\d+$', tokens[end_index + 2]):
-            has_roe = True
-            roe_value = float(tokens[end_index + 2])
+    # Check for tour indicators (M/BT or M/IT)
+    tour_indicators = []
+    for token in tokens:
+        if token in ["M/BT", "M/IT"]:
+            tour_indicators.append(token)
     
-    # Check for fare value after currency code
-    currency_index = -1
+    has_tour_indicator = len(tour_indicators) > 0
+    
+    # Check for side trips (indicated by parentheses)
+    side_trips = []
+    in_side_trip = False
+    current_side_trip = []
+    
+    for token in tokens:
+        if token == "(":
+            in_side_trip = True
+            current_side_trip = ["("]
+        elif token == ")" and in_side_trip:
+            in_side_trip = False
+            current_side_trip.append(")")
+            side_trips.append(' '.join(current_side_trip))
+            current_side_trip = []
+        elif in_side_trip:
+            current_side_trip.append(token)
+    
+    # Check for unbalanced parentheses
+    if in_side_trip:
+        return {'is_valid': False, 'message': "Unbalanced parentheses in side trip"}
+    
+    has_side_trips = len(side_trips) > 0
+    
+    # Check for currency code and fare value
+    currency_code = None
+    fare_value = None
+    
+    # Common currency codes
+    currency_codes = ["NUC", "GBP", "INR", "USD", "EUR", "AUD", "CAD", "JPY", "SGD"]
+    
+    # Look for currency code in tokens
     for i, token in enumerate(tokens):
-        if token.upper() == currency_code:
-            currency_index = i
+        upper_token = token.upper()
+        if upper_token in currency_codes:
+            currency_code = upper_token
+            # Check if there's a fare value after the currency code
+            if i + 1 < len(tokens) and re.match(r'^\d+(\.\d+)?$', tokens[i + 1]):
+                fare_value = float(tokens[i + 1])
             break
     
-    if currency_index == -1:
-        return {'is_valid': False, 'message': f"Currency code {currency_code} not found in pattern"}
+    # For tour fares or side trips, currency code is optional
+    if (has_tour_indicator or has_side_trips) and currency_code is None:
+        # If no currency code found but we have tour indicators or side trips, set currency to NUC
+        currency_code = "NUC"
+    elif currency_code is None:
+        # If not a tour fare or side trip and no currency code, pattern is invalid
+        return {'is_valid': False, 'message': "Missing currency code token"}
     
-    if currency_index + 1 >= len(tokens) or not re.match(r'^\d+\.\d{2}$', tokens[currency_index + 1]):
-        return {'is_valid': False, 'message': f"Invalid or missing {currency_code} value"}
+    # Check for ROE value
+    roe_value = None
+    has_roe = False
     
-    fare_value = float(tokens[currency_index + 1])
+    # Look for ROE in tokens
+    for i, token in enumerate(tokens):
+        if token == "ROE" and i + 1 < len(tokens) and re.match(r'^\d+(\.\d+)?$', tokens[i + 1]):
+            has_roe = True
+            roe_value = float(tokens[i + 1])
+            break
+        elif token.startswith("ROE") and re.match(r'^ROE\d+(\.\d+)?$', token):
+            has_roe = True
+            roe_value = float(token[3:])
+            break
     
-    # Extract journey segments and fares
+    # Extract journey segments, fares, Q surcharges, class differentials, plus ups
     journey_segments = []
     journey_fares = []
     q_surcharges = []
+    class_differentials = []
+    plus_up_amounts = []
     
     # Check if the pattern starts with an involuntary journey change indicator
     has_invol = False
@@ -580,43 +711,126 @@ def validate_pattern_structure(pattern):
     if tokens[0] == "I-":
         has_invol = True
         start_index = 1
-        # Check if there's an airport code after I-
-        if len(tokens) > 1 and tokens[1] in AIRPORT_CODES:
-            start_index = 1
-        else:
-            return {'is_valid': False, 'message': f"Invalid pattern: I- must be followed by an airport code"}
     
-    # Check if the first token (after I- if present) is a valid airport code
-    if start_index >= len(tokens) or tokens[start_index] not in AIRPORT_CODES:
-        return {'is_valid': False, 'message': f"First token '{tokens[start_index]}' is not a valid airport code"}
-    
-    # Process tokens before currency code
+    # Process tokens to extract segments, fares, etc.
     i = start_index
     current_segment = []
-    while i < currency_index:
+    end_index = len(tokens)
+    
+    # Find the END token to limit our processing
+    if "END" in tokens:
+        end_index = tokens.index("END")
+    
+    # Process tokens before END
+    while i < end_index:
         token = tokens[i]
         
         # Check for Q surcharge
-        if token == "Q" and i + 1 < currency_index and re.match(r'^\d+\.\d{2}$', tokens[i + 1]):
+        if token == "Q" and i + 1 < end_index and re.match(r'^\d+(\.\d+)?$', tokens[i + 1]):
             q_surcharges.append(float(tokens[i + 1]))
             i += 2
             continue
         
         # Check for Q surcharge in format Q10.00
-        if token.startswith("Q") and re.match(r'^Q\d+\.\d{2}$', token):
+        if token.startswith("Q") and re.match(r'^Q\d+(\.\d+)?$', token):
             q_value = float(token[1:])
             q_surcharges.append(q_value)
             i += 1
             continue
         
+        # Check for class differential
+        if token == "D" and i + 2 < end_index and re.match(r'^[A-Z]{6}$', tokens[i + 1]) and re.match(r'^\d+(\.\d+)?$', tokens[i + 2]):
+            class_differentials.append(float(tokens[i + 2]))
+            i += 3
+            continue
+        
+        # Check for class differential in format D10.00
+        if token.startswith("D") and re.match(r'^D\d+(\.\d+)?$', token):
+            d_value = float(token[1:])
+            class_differentials.append(d_value)
+            i += 1
+            continue
+        
+        # Check for plus up with 6-char airport code and amount
+        if token == "P" and i + 2 < end_index and re.match(r'^[A-Z]{6}$', tokens[i + 1]) and re.match(r'^\d+(\.\d+)?$', tokens[i + 2]):
+            plus_up_amounts.append(float(tokens[i + 2]))
+            i += 3
+            continue
+        
+        # Check for plus up with separated airport codes
+        if token == "P" and i + 3 < end_index and tokens[i + 1] in AIRPORT_CODES and tokens[i + 2] in AIRPORT_CODES and re.match(r'^\d+(\.\d+)?$', tokens[i + 3]):
+            plus_up_amounts.append(float(tokens[i + 3]))
+            i += 4
+            continue
+        
+        # Check for plus up in format P10.00
+        if token.startswith("P") and re.match(r'^P\d+(\.\d+)?$', token):
+            p_value = float(token[1:])
+            plus_up_amounts.append(p_value)
+            i += 1
+            continue
+        
+        # Check for plus up with amount only
+        if token == "P" and i + 1 < end_index and re.match(r'^\d+(\.\d+)?$', tokens[i + 1]):
+            plus_up_amounts.append(float(tokens[i + 1]))
+            i += 2
+            continue
+        
         # Check for fare amount
-        if re.match(r'^\d+\.\d{2}$', token):
-            # If we have a current segment, add it to journey_segments
-            if current_segment:
-                journey_segments.append(' '.join(current_segment))
-                current_segment = []
+        if re.match(r'^\d+(\.\d+)?$', token):
+            # Check if this is a Q surcharge amount (preceded by Q)
+            if i > 0 and tokens[i - 1] == "Q":
+                i += 1
+                continue
             
+            # Check if this is a class differential amount (preceded by D and a segment pair)
+            if i > 1 and tokens[i - 2] == "D" and re.match(r'^[A-Z]{6}$', tokens[i - 1]):
+                i += 1
+                continue
+            
+            # Check if this is a plus up amount (preceded by P and possibly a segment pair)
+            if i > 0 and tokens[i - 1] == "P":
+                i += 1
+                continue
+            
+            if i > 1 and tokens[i - 2] == "P" and re.match(r'^[A-Z]{6}$', tokens[i - 1]):
+                i += 1
+                continue
+            
+            if i > 2 and tokens[i - 3] == "P" and tokens[i - 2] in AIRPORT_CODES and tokens[i - 1] in AIRPORT_CODES:
+                i += 1
+                continue
+            
+            # Check if this is a fare amount after a currency code
+            if i > 0 and tokens[i - 1] in ["NUC", "GBP", "INR", "USD", "EUR", "AUD", "CAD", "JPY", "SGD"]:
+                i += 1
+                continue
+            
+            # Check if this is a ROE value (preceded by ROE)
+            if i > 0 and tokens[i - 1] == "ROE":
+                i += 1
+                continue
+            
+            # This is a journey fare
             journey_fares.append(float(token))
+            i += 1
+            continue
+        
+        # Check for mileage fare amount (M-prefixed)
+        if re.match(r'^M\d+(\.\d+)?$', token):
+            # Extract the numeric value from the mileage fare token
+            mileage_fare = float(token[1:])  # Remove the 'M' prefix
+            
+            # Add to journey fares
+            journey_fares.append(mileage_fare)
+            i += 1
+            continue
+        
+        # Check for tour indicators (M/BT or M/IT)
+        if token in ["M/BT", "M/IT"]:
+            # Don't add to current segment, track separately
+            if token not in tour_indicators:
+                tour_indicators.append(token)
             i += 1
             continue
         
@@ -629,428 +843,64 @@ def validate_pattern_structure(pattern):
         journey_segments.append(' '.join(current_segment))
     
     # Calculate total fare
-    total_fare = sum(journey_fares)
+    total_journey_fare = sum(journey_fares)
     total_q_surcharge = sum(q_surcharges)
-    calculated_fare = total_fare + total_q_surcharge
+    total_class_differential = sum(class_differentials)
+    total_plus_up = sum(plus_up_amounts)
+    calculated_fare = total_journey_fare + total_q_surcharge + total_class_differential + total_plus_up
     
-    # Check if calculated fare matches the fare value in the pattern
-    # MODIFIED: Always include Q surcharges in fare calculation
-    is_fare_match = abs(calculated_fare - fare_value) < 0.01
+    # For tour fares, we don't need to match the fare value
+    if has_tour_indicator:
+        is_fare_match = True
+    else:
+        # Check if calculated fare matches the fare value in the pattern
+        is_fare_match = True  # Default to true
+        if fare_value is not None:
+            is_fare_match = abs(calculated_fare - fare_value) < 0.01
     
-    # IMPORTANT: If the fare value doesn't match the calculated fare (including Q surcharges),
-    # we should flag this as a potential issue
+    # Check for fare mismatch warning
     fare_mismatch_warning = None
-    if not is_fare_match:
-        if abs(total_fare - fare_value) < 0.01:
-            fare_mismatch_warning = f"Warning: Fare value {fare_value} matches total journey fare {total_fare} but excludes Q surcharges {total_q_surcharge}. Total should be {calculated_fare}."
+    if not is_fare_match and fare_value is not None:
+        if abs(total_journey_fare - fare_value) < 0.01:
+            fare_mismatch_warning = f"Warning: Fare value {fare_value} matches total journey fare {total_journey_fare} but excludes Q surcharges {total_q_surcharge}, class differentials {total_class_differential}, and plus ups {total_plus_up}. Total should be {calculated_fare}."
         else:
-            fare_mismatch_warning = f"Warning: Fare value {fare_value} does not match calculated fare total {calculated_fare} (journey fares: {total_fare}, Q surcharges: {total_q_surcharge})."
+            fare_mismatch_warning = f"Warning: Fare value {fare_value} does not match calculated fare total {calculated_fare} (journey fares: {total_journey_fare}, Q surcharges: {total_q_surcharge}, class differentials: {total_class_differential}, plus ups: {total_plus_up})."
     
-    # Validate journey segments
-    is_valid_journey = True
-    
-    # Process each segment to remove Q surcharges before validation
-    processed_segments = []
-    for segment in journey_segments:
-        segment_tokens = segment.split()
-        processed_segment_tokens = []
-        
-        i = 0
-        while i < len(segment_tokens):
-            token = segment_tokens[i]
-            
-            # Skip Q surcharge tokens
-            if token == "Q" and i + 1 < len(segment_tokens) and re.match(r'^\d+\.\d{2}$', segment_tokens[i + 1]):
-                i += 2  # Skip both Q and the amount
-                continue
-            
-            # Skip Q surcharge in format Q10.00
-            if token.startswith("Q") and re.match(r'^Q\d+\.\d{2}$', token):
-                i += 1  # Skip the Q surcharge
-                continue
-            
-            # Add other tokens
-            processed_segment_tokens.append(token)
-            i += 1
-        
-        # Add the processed segment
-        if processed_segment_tokens:
-            processed_segments.append(' '.join(processed_segment_tokens))
-    
-    # Simplified journey validation that allows for multiple airlines and airports in a segment
-    for segment in processed_segments:
-        segment_tokens = segment.split()
-        
-        # Check if segment has at least an origin and destination
-        if len(segment_tokens) < 2:
-            is_valid_journey = False
-            break
-        
-        # First token should be an airport code (unless it's I-)
-        first_token_index = 0
-        if segment_tokens[0] == "I-" and len(segment_tokens) > 1:
-            first_token_index = 1
-        
-        if first_token_index >= len(segment_tokens) or segment_tokens[first_token_index] not in AIRPORT_CODES:
-            is_valid_journey = False
-            break
-        
-        # Last token should be an airport code
-        if segment_tokens[-1] not in AIRPORT_CODES:
-            is_valid_journey = False
-            break
-        
-        # Check for alternating airport and airline codes
-        # In a valid segment, airports and airlines should alternate, with some exceptions
-        i = first_token_index
-        expected_type = "AIRPORT"  # Start with expecting an airport
-        
-        while i < len(segment_tokens):
-            token = segment_tokens[i]
-            
-            # Handle special cases
-            if token == "I-":
-                # I- should be at the beginning of the segment
-                if i != 0:
-                    is_valid_journey = False
-                    break
-                i += 1
-                continue
-            
-            # Handle transit indicators
-            if token == "X/":
-                # Transit indicator should be followed by an airport code
-                if i + 1 < len(segment_tokens) and segment_tokens[i + 1] in AIRPORT_CODES:
-                    i += 1  # Skip to the airport code
-                    expected_type = "AIRPORT"  # Next token should be an airport
-                else:
-                    is_valid_journey = False
-                    break
-                i += 1
-                continue
-            
-            # Handle surface segment indicators
-            if token in ["//", "/-"]:
-                # Surface indicator should be followed by an airport code
-                if i + 1 < len(segment_tokens) and segment_tokens[i + 1] in AIRPORT_CODES:
-                    i += 1  # Skip to the airport code
-                    expected_type = "AIRPORT"  # Next token should be an airport
-                else:
-                    is_valid_journey = False
-                    break
-                i += 1
-                continue
-            
-            # Check token type
-            token_type = None
-            if token in AIRPORT_CODES:
-                token_type = "AIRPORT"
-            elif token in AIRLINE_CODES:
-                token_type = "AIRLINE"
-            
-            # Validate token type
-            if token_type != expected_type:
-                # Allow for multiple airlines in a row (e.g., "LON BA AF PAR")
-                if expected_type == "AIRPORT" and token_type == "AIRLINE" and i + 1 < len(segment_tokens) and segment_tokens[i + 1] in AIRLINE_CODES:
-                    # Multiple airlines in a row, keep expecting an airline
-                    expected_type = "AIRLINE"
-                else:
-                    # Toggle expected type
-                    expected_type = "AIRLINE" if expected_type == "AIRPORT" else "AIRPORT"
-            
-            i += 1
-        
-        # After processing all tokens, we should end with an airport
-        if expected_type != "AIRPORT":
-            is_valid_journey = False
-            break
-    
-    # For this specific pattern, we'll consider the journey valid if the fare match is valid
-    # This is a temporary fix to handle complex segments with multiple airlines
-    if is_fare_match:
+    # For tour fares, consider the journey valid if tour indicators are present
+    if has_tour_indicator:
         is_valid_journey = True
+    else:
+        # Validate journey segments for non-tour fares
+        is_valid_journey = len(journey_segments) > 0
+        
+        # Additional validation for non-tour fares
+        for segment in journey_segments:
+            segment_tokens = segment.split()
+            
+            # Check if segment has at least an origin and destination
+            if len(segment_tokens) < 2:
+                is_valid_journey = False
+                break
     
-    result = {
-        'is_valid': is_fare_match and is_valid_journey,
-        'message': "Valid pattern" if (is_fare_match and is_valid_journey) else "Invalid pattern",
+    # Return the validation result with side trip information added
+    return {
+        'is_valid': is_valid_journey and is_fare_match,
+        'message': "Valid pattern" if (is_valid_journey and is_fare_match) else "Invalid pattern",
         'journey_segments': journey_segments,
         'journey_fares': journey_fares,
         'q_surcharges': q_surcharges,
-        'total_fare': total_fare,
-        'total_q_surcharge': total_q_surcharge,
-        'calculated_fare': calculated_fare,
+        'class_differentials': class_differentials,
+        'plus_up_amounts': plus_up_amounts,  # Add plus up amounts to the result
+        'tour_indicators': tour_indicators,
+        'side_trips': side_trips,
         'fare_value': fare_value,
-        'currency_code': currency_code,
+        'calculated_fare': calculated_fare,
         'is_fare_match': is_fare_match,
-        'is_valid_journey': is_valid_journey,
         'has_roe': has_roe,
         'roe_value': roe_value,
-        'has_invol': has_invol
+        'currency_code': currency_code,
+        'fare_mismatch_warning': fare_mismatch_warning
     }
-    
-    # Add fare mismatch warning if applicable
-    if fare_mismatch_warning:
-        result['fare_mismatch_warning'] = fare_mismatch_warning
-    
-    return result
-
-def reconstruct_valid_pattern(tokens):
-    """
-    Attempt to reconstruct a valid fare calculation pattern from tokens
-    
-    Args:
-        tokens (list): List of tokens to reconstruct
-        
-    Returns:
-        str: The reconstructed pattern, or None if reconstruction fails
-    """
-    # Check if we have enough tokens to form a valid pattern
-    if len(tokens) < 3:
-        return None
-    
-    # Check if we have NUC and END tokens
-    has_nuc = "NUC" in tokens
-    has_end = "END" in tokens
-    
-    if not has_nuc or not has_end:
-        # Try to add missing tokens
-        if not has_nuc:
-            # Find a position to insert NUC
-            for i, token in enumerate(tokens):
-                if re.match(r'^\d+\.\d{2}$', token) and i + 1 < len(tokens) and tokens[i+1] == "END":
-                    # Insert NUC before the fare amount
-                    tokens.insert(i, "NUC")
-                    has_nuc = True
-                    break
-        
-        if not has_end:
-            # Find a position to insert END
-            for i, token in enumerate(tokens):
-                if token == "NUC" and i + 1 < len(tokens) and re.match(r'^\d+\.\d{2}$', tokens[i+1]):
-                    # Insert END after the NUC amount
-                    tokens.insert(i+2, "END")
-                    has_end = True
-                    break
-    
-    # Check if we have fare amounts
-    fare_amounts = []
-    for token in tokens:
-        if re.match(r'^\d+\.\d{2}$', token):
-            fare_amounts.append(float(token))
-    
-    if len(fare_amounts) < 2:
-        # Not enough fare amounts to form a valid pattern
-        return None
-    
-    # Check if the pattern starts with an involuntary journey change indicator
-    has_invol = "I-" in tokens and tokens.index("I-") == 0
-    
-    # Identify special tokens like transit indicators and surface segments
-    transit_indicators = []
-    surface_indicators = []
-    for i, token in enumerate(tokens):
-        if token == "X/":
-            # Check if followed by an airport code
-            if i + 1 < len(tokens) and tokens[i+1] in AIRPORT_CODES:
-                transit_indicators.append((i, tokens[i+1]))
-        elif token in ["//", "/-"]:
-            # Check if followed by an airport code
-            if i + 1 < len(tokens) and tokens[i+1] in AIRPORT_CODES:
-                surface_indicators.append((i, tokens[i+1]))
-    
-    # Check if we have alternating airport and airline codes
-    airport_codes = []
-    airline_codes = []
-    
-    for token in tokens:
-        if token in AIRPORT_CODES:
-            airport_codes.append(token)
-        elif token in AIRLINE_CODES:
-            airline_codes.append(token)
-    
-    if len(airport_codes) < 2 or len(airline_codes) < 1:
-        # Not enough codes to form a valid pattern
-        return None
-    
-    # Try to reconstruct a valid pattern
-    reconstructed = []
-    
-    # Start with I- if the pattern has an involuntary journey change
-    if has_invol:
-        reconstructed.append("I-")
-    
-    # Start with an airport code
-    reconstructed.append(airport_codes[0])
-    
-    # Add alternating airline and airport codes, including transit and surface indicators
-    airport_index = 1  # Start from the second airport code
-    airline_index = 0
-    
-    while airport_index < len(airport_codes) and airline_index < len(airline_codes):
-        # Add airline code
-        reconstructed.append(airline_codes[airline_index])
-        airline_index += 1
-        
-        # Check if the next airport should have a transit indicator
-        has_transit = False
-        for transit_idx, transit_airport in transit_indicators:
-            if transit_airport == airport_codes[airport_index]:
-                reconstructed.append("X/")
-                has_transit = True
-                break
-    
-        # Check if the next airport should have a surface indicator
-        has_surface = False
-        if not has_transit:  # Only check for surface if not transit
-            for surface_idx, surface_airport in surface_indicators:
-                if surface_airport == airport_codes[airport_index]:
-                    reconstructed.append(tokens[surface_idx])  # Add the specific surface indicator
-                    has_surface = True
-                    break
-        
-        # Add airport code
-        reconstructed.append(airport_codes[airport_index])
-        airport_index += 1
-    
-    # Add fare amount
-    reconstructed.append(f"{fare_amounts[0]:.2f}")
-    
-    # Add NUC and fare amount
-    if "NUC" not in reconstructed:
-        reconstructed.append("NUC")
-    else:
-        # Find the NUC position and ensure it's followed by a fare amount
-        nuc_index = reconstructed.index("NUC")
-        if nuc_index + 1 >= len(reconstructed) or not re.match(r'^\d+\.\d{2}$', reconstructed[nuc_index + 1]):
-            # Add the total fare amount after NUC
-            reconstructed.insert(nuc_index + 1, f"{sum(fare_amounts):.2f}")
-    
-    # Add END
-    if "END" not in reconstructed:
-        reconstructed.append("END")
-    
-    # Join the reconstructed pattern
-    return ' '.join(reconstructed)
-
-def analyze_pattern(pattern):
-    """
-    Analyze a fare calculation pattern and return detailed information
-    
-    Args:
-        pattern (str): The fare calculation pattern
-        
-    Returns:
-        dict: Dictionary with analysis results
-    """
-    # Original pattern
-    original_pattern = pattern
-    
-    # Remove any special markers that might be in the pattern
-    if ":" in original_pattern:
-        original_pattern = original_pattern.split(":")[0].strip()
-    
-    # Remove @Web marker from the original pattern (no longer needed)
-    if "@Web" in original_pattern:
-        original_pattern = original_pattern.replace("@Web", "").strip()
-    
-    # Always ensure I- prefix is preserved for fare calculation applications
-    # Add I- prefix if not present, regardless of markers
-    has_i_prefix = original_pattern.startswith("I-")
-    if not has_i_prefix:
-        original_pattern = "I- " + original_pattern
-    
-    # Special handling for Q surcharges in the pattern
-    tokens = original_pattern.split()
-    processed_tokens = []
-    i = 0
-    while i < len(tokens):
-        token = tokens[i]
-        
-        # Handle Q surcharge (Q followed by a fare amount)
-        if token == "Q" and i + 1 < len(tokens) and re.match(r'^\d+\.\d{2}$', tokens[i + 1]):
-            # Combine Q and fare amount into a Q surcharge token (e.g., "Q10.00")
-            q_surcharge = f"Q{tokens[i + 1]}"
-            processed_tokens.append(q_surcharge)
-            i += 2  # Skip both tokens
-            continue
-        
-        processed_tokens.append(token)
-        i += 1
-    
-    # Use the processed pattern for cleaning
-    processed_pattern = ' '.join(processed_tokens)
-    
-    # Clean the pattern
-    cleaned_pattern, garbage_tokens, spacing_issues = clean_pattern(processed_pattern)
-    
-    # Ensure I- prefix is preserved in cleaned pattern
-    if has_i_prefix and not cleaned_pattern.startswith("I-"):
-        cleaned_pattern = "I- " + cleaned_pattern.replace("I- ", "")
-    elif not cleaned_pattern.startswith("I-"):
-        cleaned_pattern = "I- " + cleaned_pattern
-    
-    # Calculate fare total to get Q surcharges before any auto-correction
-    journey_validation_temp = validate_pattern_structure(cleaned_pattern)
-    total_journey_fare, q_surcharge_total, fare_total, expected_fare, currency_code, _ = calculate_fare_total(cleaned_pattern, journey_validation_temp)
-    
-    # Always auto-correct fare total to include Q surcharges
-    if expected_fare is not None:
-        # Always update the fare total to include Q surcharges
-        corrected_fare = total_journey_fare + q_surcharge_total
-        
-        # Update the NUC amount in cleaned_pattern
-        if currency_code:
-            # Find the pattern like "NUC 750.00" and replace with corrected value
-            cleaned_pattern = re.sub(
-                rf"{currency_code}\s+\d+\.\d{{2}}", 
-                f"{currency_code} {corrected_fare:.2f}", 
-                cleaned_pattern
-            )
-            
-            # Also update the original pattern
-            original_pattern = re.sub(
-                rf"{currency_code}\s+\d+\.\d{{2}}", 
-                f"{currency_code} {corrected_fare:.2f}", 
-                original_pattern
-            )
-            
-            if abs(expected_fare - corrected_fare) > 0.01:
-                print(f"Auto-corrected fare total from {expected_fare:.2f} to {corrected_fare:.2f} (including Q surcharges)")
-    
-    # Now validate the pattern structure with potentially corrected fare
-    journey_validation = validate_pattern_structure(cleaned_pattern)
-    
-    # Recalculate fare total with currency detection after potential correction
-    total_journey_fare, q_surcharge_total, fare_total, expected_fare, currency_code, is_fare_match = calculate_fare_total(cleaned_pattern, journey_validation)
-    
-    # Extract ROE value if present
-    roe_value = None
-    roe_match = re.search(r'ROE\s+(\d+\.\d{2})', original_pattern)
-    if roe_match:
-        roe_value = float(roe_match.group(1))
-    
-    # Determine if the pattern is valid
-    is_valid = journey_validation.get('is_valid', False) and is_fare_match
-    
-    # Prepare the result dictionary
-    result = {
-        'is_valid': is_valid,
-        'original_pattern': original_pattern,
-        'cleaned_pattern': cleaned_pattern,
-        'garbage_tokens': garbage_tokens,
-        'spacing_issues': spacing_issues,
-        'fare_calculation': {
-            'journey_fares': journey_validation.get('journey_fares', []),
-            'q_surcharge': q_surcharge_total,
-            'total_journey_fare': total_journey_fare,
-            'expected_fare': expected_fare,
-            'calculated_fare_total': fare_total,
-            'roe_value': roe_value,
-            'currency_code': currency_code
-        }
-    }
-    
-    return result
 
 def validate_journey_string(pattern, journey_string):
     """
@@ -1178,46 +1028,138 @@ def calculate_fare_total(pattern, journey_validation=None):
         journey_validation (dict, optional): Journey validation results
         
     Returns:
-        tuple: (total_journey_fare, q_surcharge_total, fare_total, expected_fare, currency_code, is_fare_match)
+        tuple: (total_journey_fare, q_surcharge_total, class_differential_total, plus_up_total, tour_indicator, fare_total, expected_fare, currency_code, is_fare_match)
     """
     tokens = pattern.split()
     
     # Extract journey fares
     journey_fares = []
     q_surcharges = []
+    class_differentials = []
+    tour_indicators = []
+    plus_up_amounts = []
     
     # If we have journey validation results, use them
     if journey_validation:
         journey_fares = journey_validation.get('journey_fares', [])
         q_surcharges = journey_validation.get('q_surcharges', [])
+        class_differentials = journey_validation.get('class_differentials', [])
+        tour_indicators = journey_validation.get('tour_indicators', [])
+        plus_up_amounts = journey_validation.get('plus_up_amounts', [])
     else:
-        # Extract fares and Q surcharges
-        for i, token in enumerate(tokens):
+        # Extract fares, Q surcharges, class differentials, plus ups, and tour indicators
+        i = 0
+        while i < len(tokens):
+            token = tokens[i]
+            
             # Check for Q surcharge
-            if token == "Q" and i + 1 < len(tokens) and re.match(r'^\d+\.\d{2}$', tokens[i + 1]):
+            if token == "Q" and i + 1 < len(tokens) and re.match(r'^\d+(\.\d+)?$', tokens[i + 1]):
                 q_surcharges.append(float(tokens[i + 1]))
+                i += 2
+                continue
             
             # Check for Q surcharge in format Q10.00
-            if token.startswith("Q") and re.match(r'^Q\d+\.\d{2}$', token):
+            if token.startswith("Q") and re.match(r'^Q\d+(\.\d+)?$', token):
                 q_value = float(token[1:])
                 q_surcharges.append(q_value)
+                i += 1
+                continue
+            
+            # Check for class differential (D AMSLON 10.00)
+            if token == "D" and i + 2 < len(tokens) and re.match(r'^[A-Z]{6}$', tokens[i + 1]) and re.match(r'^\d+(\.\d+)?$', tokens[i + 2]):
+                class_differentials.append(float(tokens[i + 2]))
+                i += 3
+                continue
+            
+            # Check for class differential in format D10.00
+            if token.startswith("D") and re.match(r'^D\d+(\.\d+)?$', token):
+                d_value = float(token[1:])
+                class_differentials.append(d_value)
+                i += 1
+                continue
+            
+            # Check for plus up (P AMSLON 10.00)
+            if token == "P" and i + 2 < len(tokens) and re.match(r'^[A-Z]{6}$', tokens[i + 1]) and re.match(r'^\d+(\.\d+)?$', tokens[i + 2]):
+                plus_up_amounts.append(float(tokens[i + 2]))
+                i += 3
+                continue
+            
+            # Check for plus up with separated airport codes
+            if token == "P" and i + 3 < len(tokens) and tokens[i + 1] in AIRPORT_CODES and tokens[i + 2] in AIRPORT_CODES and re.match(r'^\d+(\.\d+)?$', tokens[i + 3]):
+                plus_up_amounts.append(float(tokens[i + 3]))
+                i += 4
+                continue
+            
+            # Check for plus up in format P10.00
+            if token.startswith("P") and re.match(r'^P\d+(\.\d+)?$', token):
+                p_value = float(token[1:])
+                plus_up_amounts.append(p_value)
+                i += 1
+                continue
+            
+            # Check for plus up with amount only
+            if token == "P" and i + 1 < len(tokens) and re.match(r'^\d+(\.\d+)?$', tokens[i + 1]):
+                plus_up_amounts.append(float(tokens[i + 1]))
+                i += 2
+                continue
+            
+            # Check for tour indicators (M/BT or M/IT)
+            if token in ["M/BT", "M/IT"]:
+                tour_indicators.append(token)
+                i += 1
+                continue
             
             # Check for fare amount
-            if re.match(r'^\d+\.\d{2}$', token):
+            if re.match(r'^\d+(\.\d+)?$', token):
                 # Check if this is a Q surcharge amount (preceded by Q)
                 if i > 0 and tokens[i - 1] == "Q":
+                    i += 1
+                    continue
+                
+                # Check if this is a class differential amount (preceded by D and a segment pair)
+                if i > 1 and tokens[i - 2] == "D" and re.match(r'^[A-Z]{6}$', tokens[i - 1]):
+                    i += 1
+                    continue
+                
+                # Check if this is a plus up amount (preceded by P and possibly a segment pair)
+                if i > 0 and tokens[i - 1] == "P":
+                    i += 1
+                    continue
+                
+                if i > 1 and tokens[i - 2] == "P" and re.match(r'^[A-Z]{6}$', tokens[i - 1]):
+                    i += 1
+                    continue
+                
+                if i > 2 and tokens[i - 3] == "P" and tokens[i - 2] in AIRPORT_CODES and tokens[i - 1] in AIRPORT_CODES:
+                    i += 1
                     continue
                 
                 # Check if this is a fare amount after a currency code
                 if i > 0 and tokens[i - 1] in ["NUC", "GBP", "INR", "USD", "EUR", "AUD", "CAD", "JPY", "SGD"]:
+                    i += 1
                     continue
                 
                 # Check if this is a ROE value (preceded by ROE)
                 if i > 0 and tokens[i - 1] == "ROE":
+                    i += 1
                     continue
                 
                 # This is a journey fare
                 journey_fares.append(float(token))
+                i += 1
+                continue
+            
+            # Check for mileage fare amount (M-prefixed)
+            if re.match(r'^M\d+(\.\d+)?$', token):
+                # Extract the numeric value from the mileage fare token
+                mileage_fare = float(token[1:])  # Remove the 'M' prefix
+                
+                # Add to journey fares
+                journey_fares.append(mileage_fare)
+                i += 1
+                continue
+            
+            i += 1
     
     # Calculate total journey fare
     total_journey_fare = sum(journey_fares)
@@ -1225,35 +1167,57 @@ def calculate_fare_total(pattern, journey_validation=None):
     # Calculate total Q surcharge
     q_surcharge_total = sum(q_surcharges)
     
-    # Calculate total fare (including Q surcharges)
-    fare_total = total_journey_fare + q_surcharge_total
+    # Calculate total class differentials
+    class_differential_total = sum(class_differentials)
+    
+    # Calculate total plus ups
+    plus_up_total = sum(plus_up_amounts)
+    
+    # Calculate total fare (including Q surcharges, class differentials, and plus ups)
+    fare_total = total_journey_fare + q_surcharge_total + class_differential_total + plus_up_total
     
     # Extract currency code and expected fare
     currency_code = None
     expected_fare = None
     
     for i, token in enumerate(tokens):
-        if token in ["NUC", "GBP", "INR", "USD", "EUR", "AUD", "CAD", "JPY", "SGD"] or token.upper() in ["NUC", "GBP", "INR", "USD", "EUR", "AUD", "CAD", "JPY", "SGD"]:
-            currency_code = token.upper()
-            if i + 1 < len(tokens) and re.match(r'^\d+\.\d{2}$', tokens[i + 1]):
+        upper_token = token.upper()
+        if upper_token in ["NUC", "GBP", "INR", "USD", "EUR", "AUD", "CAD", "JPY", "SGD"]:
+            currency_code = upper_token
+            # Check if there's a fare value after the currency code
+            if i + 1 < len(tokens) and re.match(r'^\d+(\.\d+)?$', tokens[i + 1]):
                 expected_fare = float(tokens[i + 1])
-                break
+            break
     
-    # Check if the expected fare matches the calculated fare total (ALWAYS including Q surcharges)
-    is_fare_match = False
-    if expected_fare is not None:
-        # MODIFIED: Always validate against total fare with Q surcharges included
-        is_fare_match = abs(fare_total - expected_fare) < 0.01
-        
-        # Add a warning if the expected fare doesn't match the calculated fare total
-        if not is_fare_match:
-            # If the expected fare matches journey fare but not total, provide specific message
-            if abs(total_journey_fare - expected_fare) < 0.01:
-                print(f"Warning: Expected fare {expected_fare} matches journey fare {total_journey_fare} but excludes Q surcharges {q_surcharge_total}. Total should be {fare_total}.")
-            else:
-                print(f"Warning: Expected fare {expected_fare} does not match calculated fare total {fare_total} (journey fares: {total_journey_fare}, Q surcharges: {q_surcharge_total}).")
+    # If we found tour indicators but no currency code, set default to NUC
+    if len(tour_indicators) > 0 and currency_code is None:
+        currency_code = "NUC"
     
-    return total_journey_fare, q_surcharge_total, fare_total, expected_fare, currency_code, is_fare_match
+    # Check if this is a tour fare (M/BT or M/IT)
+    has_tour_indicator = len(tour_indicators) > 0
+    
+    # For tour fares, there might not be an expected fare to match against
+    if has_tour_indicator:
+        is_fare_match = True  # Tour fares don't require fare matching
+    else:
+        # Check if the expected fare matches the calculated fare total
+        is_fare_match = False
+        if expected_fare is not None:
+            # MODIFIED: Always validate against total fare with Q surcharges, class differentials, and plus ups included
+            is_fare_match = abs(fare_total - expected_fare) < 0.01
+            
+            # Add a warning if the expected fare doesn't match the calculated fare total
+            if not is_fare_match:
+                # If the expected fare matches journey fare but not total, provide specific message
+                if abs(total_journey_fare - expected_fare) < 0.01:
+                    print(f"Warning: Expected fare {expected_fare} matches journey fare {total_journey_fare} but excludes Q surcharges {q_surcharge_total}, class differentials {class_differential_total}, and plus ups {plus_up_total}. Total should be {fare_total}.")
+                else:
+                    print(f"Warning: Expected fare {expected_fare} does not match calculated fare total {fare_total} (journey fares: {total_journey_fare}, Q surcharges: {q_surcharge_total}, class differentials: {class_differential_total}, plus ups: {plus_up_total}).")
+        else:
+            # If no expected fare, consider it a match
+            is_fare_match = True
+    
+    return total_journey_fare, q_surcharge_total, class_differential_total, plus_up_total, tour_indicators, fare_total, expected_fare, currency_code, is_fare_match
 
 # Keep the original function for backward compatibility
 def calculate_nuc_total(pattern, journey_validation):
@@ -1267,7 +1231,7 @@ def calculate_nuc_total(pattern, journey_validation):
     Returns:
         tuple: (total_journey_fare, total_q_surcharge, nuc_total, expected_nuc, is_valid)
     """
-    total_journey_fare, q_surcharge_total, fare_total, expected_fare, currency_code, is_valid = calculate_fare_total(pattern, journey_validation)
+    total_journey_fare, q_surcharge_total, class_differential_total, plus_up_total, _, fare_total, expected_fare, currency_code, is_valid = calculate_fare_total(pattern, journey_validation)
     
     # For backward compatibility, if currency is not NUC, still return the values as if they were NUC
     if currency_code != "NUC":
@@ -1419,10 +1383,13 @@ def clean_pattern(pattern):
         # Rejoin tokens
         expanded_pattern = ' '.join(new_tokens)
     
-    # Process tokens to preserve fare amounts and Q surcharges
+    # Process tokens to preserve fare amounts, Q surcharges, and side trip indicators
     tokens = expanded_pattern.split()
     valid_tokens = []
     i = 0
+    
+    # Track whether we are within a side trip (parentheses)
+    in_side_trip = False
     
     while i < len(tokens):
         token = tokens[i]
@@ -1430,6 +1397,13 @@ def clean_pattern(pattern):
         
         # Always keep valid tokens
         if is_valid:
+            # Handle opening parenthesis for side trip
+            if token == "(":
+                in_side_trip = True
+            # Handle closing parenthesis for side trip
+            elif token == ")" and in_side_trip:
+                in_side_trip = False
+                
             valid_tokens.append(token)
             
             # Special handling for Q surcharges
@@ -1441,8 +1415,16 @@ def clean_pattern(pattern):
                 if next_is_valid and (next_token_type == "FARE" or next_token_type == "NUMERIC"):
                     valid_tokens.append(next_token)  # Add the fare amount after Q
                     i += 1  # Skip to the next token since we've already added it
+        # If we're inside a side trip, preserve invalid tokens as well
+        elif in_side_trip:
+            valid_tokens.append(token)
         
         i += 1
+    
+    # Special handling for tour indicators (M/BT, M/IT) - ensure they are preserved
+    for i in range(len(tokens)):
+        if tokens[i] in ["M/BT", "M/IT"] and tokens[i] not in valid_tokens:
+            valid_tokens.append(tokens[i])
     
     # Reconstruct the pattern
     cleaned_pattern = ' '.join(valid_tokens)
@@ -1484,9 +1466,279 @@ def clean_pattern(pattern):
         # Check if token is in the cleaned pattern
         is_valid, _ = is_valid_token(token)
         if not is_valid and token not in cleaned_tokens:
-            garbage_tokens.append(token)
+            # Skip tour indicators and parentheses - they should not be marked as garbage
+            if token not in ["M/BT", "M/IT", "(", ")"]:
+                garbage_tokens.append(token)
     
     return cleaned_pattern, garbage_tokens, spacing_issues
+
+def reconstruct_valid_pattern(tokens):
+    """
+    Attempt to reconstruct a valid fare calculation pattern from tokens
+    
+    Args:
+        tokens (list): List of tokens to reconstruct
+        
+    Returns:
+        str: The reconstructed pattern, or None if reconstruction fails
+    """
+    # Check if we have enough tokens to form a valid pattern
+    if len(tokens) < 3:
+        return None
+    
+    # Check if we have NUC and END tokens
+    has_nuc = "NUC" in tokens
+    has_end = "END" in tokens
+    
+    if not has_nuc or not has_end:
+        # Try to add missing tokens
+        if not has_nuc:
+            # Find a position to insert NUC
+            for i, token in enumerate(tokens):
+                if re.match(r'^\d+\.\d{2}$', token) and i + 1 < len(tokens) and tokens[i+1] == "END":
+                    # Insert NUC before the fare amount
+                    tokens.insert(i, "NUC")
+                    has_nuc = True
+                    break
+        
+        if not has_end:
+            # Find a position to insert END
+            for i, token in enumerate(tokens):
+                if token == "NUC" and i + 1 < len(tokens) and re.match(r'^\d+\.\d{2}$', tokens[i+1]):
+                    # Insert END after the NUC amount
+                    tokens.insert(i+2, "END")
+                    has_end = True
+                    break
+    
+    # Check if we have fare amounts
+    fare_amounts = []
+    for token in tokens:
+        if re.match(r'^\d+\.\d{2}$', token):
+            fare_amounts.append(float(token))
+    
+    if len(fare_amounts) < 2:
+        # Not enough fare amounts to form a valid pattern
+        return None
+    
+    # Check if the pattern starts with an involuntary journey change indicator
+    has_invol = "I-" in tokens and tokens.index("I-") == 0
+    
+    # Identify special tokens like transit indicators and surface segments
+    transit_indicators = []
+    surface_indicators = []
+    for i, token in enumerate(tokens):
+        if token == "X/":
+            # Check if followed by an airport code
+            if i + 1 < len(tokens) and tokens[i+1] in AIRPORT_CODES:
+                transit_indicators.append((i, tokens[i+1]))
+        elif token in ["//", "/-"]:
+            # Check if followed by an airport code
+            if i + 1 < len(tokens) and tokens[i+1] in AIRPORT_CODES:
+                surface_indicators.append((i, tokens[i+1]))
+    
+    # Check if we have alternating airport and airline codes
+    airport_codes = []
+    airline_codes = []
+    
+    for token in tokens:
+        if token in AIRPORT_CODES:
+            airport_codes.append(token)
+        elif token in AIRLINE_CODES:
+            airline_codes.append(token)
+    
+    if len(airport_codes) < 2 or len(airline_codes) < 1:
+        # Not enough codes to form a valid pattern
+        return None
+    
+    # Try to reconstruct a valid pattern
+    reconstructed = []
+    
+    # Start with I- if the pattern has an involuntary journey change
+    if has_invol:
+        reconstructed.append("I-")
+    
+    # Start with an airport code
+    reconstructed.append(airport_codes[0])
+    
+    # Add alternating airline and airport codes, including transit and surface indicators
+    airport_index = 1  # Start from the second airport code
+    airline_index = 0
+    
+    while airport_index < len(airport_codes) and airline_index < len(airline_codes):
+        # Add airline code
+        reconstructed.append(airline_codes[airline_index])
+        airline_index += 1
+        
+        # Check if the next airport should have a transit indicator
+        has_transit = False
+        for transit_idx, transit_airport in transit_indicators:
+            if transit_airport == airport_codes[airport_index]:
+                reconstructed.append("X/")
+                has_transit = True
+                break
+    
+        # Check if the next airport should have a surface indicator
+        has_surface = False
+        if not has_transit:  # Only check for surface if not transit
+            for surface_idx, surface_airport in surface_indicators:
+                if surface_airport == airport_codes[airport_index]:
+                    reconstructed.append(tokens[surface_idx])  # Add the specific surface indicator
+                    has_surface = True
+                    break
+        
+        # Add airport code
+        reconstructed.append(airport_codes[airport_index])
+        airport_index += 1
+    
+    # Add fare amount
+    reconstructed.append(f"{fare_amounts[0]:.2f}")
+    
+    # Add NUC and fare amount
+    if "NUC" not in reconstructed:
+        reconstructed.append("NUC")
+    else:
+        # Find the NUC position and ensure it's followed by a fare amount
+        nuc_index = reconstructed.index("NUC")
+        if nuc_index + 1 >= len(reconstructed) or not re.match(r'^\d+\.\d{2}$', reconstructed[nuc_index + 1]):
+            # Add the total fare amount after NUC
+            reconstructed.insert(nuc_index + 1, f"{sum(fare_amounts):.2f}")
+    
+    # Add END
+    if "END" not in reconstructed:
+        reconstructed.append("END")
+    
+    # Join the reconstructed pattern
+    return ' '.join(reconstructed)
+
+def analyze_pattern(pattern):
+    """
+    Analyze a fare calculation pattern and return detailed information
+    
+    Args:
+        pattern (str): The fare calculation pattern
+        
+    Returns:
+        dict: Dictionary with analysis results
+    """
+    try:
+        # Original pattern
+        original_pattern = pattern
+        
+        # Remove FP to /FP or /FC segments at the beginning if present
+        if pattern.startswith("FP"):
+            fp_end_idx = pattern.find("/FP")
+            fc_end_idx = pattern.find("/FC")
+            
+            # Determine which marker exists and comes first (/FP or /FC)
+            if fp_end_idx != -1 and (fc_end_idx == -1 or fp_end_idx < fc_end_idx):
+                pattern = pattern[fp_end_idx + 3:].strip()  # +3 to skip "/FP"
+            elif fc_end_idx != -1:
+                pattern = pattern[fc_end_idx + 3:].strip()  # +3 to skip "/FC"
+                
+            # Check for date pattern like 19MAR after the FP segment
+            tokens = pattern.split()
+            if tokens and re.match(r'^(\d{1,2}[A-Z]{3})$', tokens[0]):
+                pattern = ' '.join(tokens[1:])  # Remove the date token
+        
+        # Remove any special markers that might be in the pattern
+        if ":" in pattern:
+            pattern = pattern.split(":")[0].strip()
+        
+        # Remove @Web marker from the original pattern (no longer needed)
+        if "@Web" in pattern:
+            pattern = pattern.replace("@Web", "").strip()
+        
+        # Check if pattern has an involuntary journey change indicator (I-)
+        # Only preserve I- if it's already in the pattern, don't add it otherwise
+        has_i_prefix = pattern.startswith("I-")
+        
+        # Special handling for Q surcharges in the pattern
+        tokens = pattern.split()
+        processed_tokens = []
+        i = 0
+        while i < len(tokens):
+            token = tokens[i]
+            
+            # Handle Q surcharge (Q followed by a fare amount)
+            if token == "Q" and i + 1 < len(tokens) and re.match(r'^\d+(\.\d+)?$', tokens[i + 1]):
+                # Combine Q and fare amount into a Q surcharge token (e.g., "Q10.00")
+                q_surcharge = f"Q{tokens[i + 1]}"
+                processed_tokens.append(q_surcharge)
+                i += 2  # Skip both tokens
+                continue
+            
+            processed_tokens.append(token)
+            i += 1
+        
+        # Use the processed pattern for cleaning
+        processed_pattern = ' '.join(processed_tokens)
+        
+        # Clean the pattern
+        cleaned_pattern, garbage_tokens, spacing_issues = clean_pattern(processed_pattern)
+        
+        # Ensure I- prefix is preserved in cleaned pattern if it was in the original
+        if has_i_prefix and not cleaned_pattern.startswith("I-"):
+            cleaned_pattern = "I- " + cleaned_pattern
+        
+        # Calculate fare total to get Q surcharges before any auto-correction
+        journey_validation_temp = validate_pattern_structure(cleaned_pattern)
+        
+        # Extract fare calculation components from validation
+        tour_indicators = journey_validation_temp.get('tour_indicators', [])
+        side_trips = journey_validation_temp.get('side_trips', [])
+        
+        # Validate the pattern structure
+        journey_validation = validate_pattern_structure(cleaned_pattern)
+        
+        # Extract fare calculation components
+        journey_fares = journey_validation.get('journey_fares', [])
+        q_surcharges = journey_validation.get('q_surcharges', [])
+        class_differentials = journey_validation.get('class_differentials', [])
+        plus_up_amounts = journey_validation.get('plus_up_amounts', [])
+        tour_indicators = journey_validation.get('tour_indicators', [])
+        side_trips = journey_validation.get('side_trips', [])
+        fare_value = journey_validation.get('fare_value')
+        currency_code = journey_validation.get('currency_code')
+        roe_value = journey_validation.get('roe_value')
+        
+        # Calculate totals
+        total_journey_fare = sum(journey_fares)
+        q_surcharge_total = sum(q_surcharges)
+        class_differential_total = sum(class_differentials)
+        plus_up_total = sum(plus_up_amounts)
+        calculated_fare_total = total_journey_fare + q_surcharge_total + class_differential_total + plus_up_total
+        
+        # Determine if the pattern is valid
+        is_valid = journey_validation.get('is_valid', False)
+        
+        # Prepare the result dictionary
+        result = {
+            'is_valid': is_valid,
+            'original_pattern': original_pattern,
+            'cleaned_pattern': cleaned_pattern,
+            'garbage_tokens': garbage_tokens,
+            'spacing_issues': spacing_issues,
+            'fare_calculation': {
+                'journey_fares': journey_fares,
+                'q_surcharge': q_surcharge_total,
+                'class_differential': class_differential_total,
+                'plus_up': plus_up_total,
+                'tour_indicators': tour_indicators,
+                'side_trips': side_trips,
+                'total_journey_fare': total_journey_fare,
+                'expected_fare': fare_value,
+                'calculated_fare_total': calculated_fare_total,
+                'roe_value': roe_value,
+                'currency_code': currency_code
+            }
+        }
+        
+        return result
+    except Exception as e:
+        import traceback
+        print(f"Exception in analyze_pattern: {e}")
+        print(traceback.format_exc())
+        return {'is_valid': False, 'error': str(e)}
 
 if __name__ == "__main__":
     # Test with the problematic pattern

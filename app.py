@@ -122,12 +122,16 @@ if analyze_button and pattern_input:
         
         # Create a DataFrame for fare details
         fare_data = {
-            "Component": ["Journey Fares", "Q Surcharge", "Total Journey Fare", "Expected Fare", "Calculated Fare Total"],
+            "Component": ["Journey Fares", "Q Surcharge", "Class Differential", "Plus Up", "Tour Indicators", "Side Trips", "Total Journey Fare", "Expected Fare", "Calculated Fare Total"],
             "Value": [
                 ", ".join([f"{fare:.2f}" for fare in result['fare_calculation']['journey_fares']]),
                 f"{result['fare_calculation']['q_surcharge']:.2f}",
+                f"{result['fare_calculation'].get('class_differential', 0.00):.2f}",
+                f"{result['fare_calculation'].get('plus_up', 0.00):.2f}",
+                ", ".join(result['fare_calculation'].get('tour_indicators', [])) or "None",
+                ", ".join(result['fare_calculation'].get('side_trips', [])) or "None",
                 f"{result['fare_calculation']['total_journey_fare']:.2f}",
-                f"{result['fare_calculation']['expected_fare']:.2f}",
+                f"{result['fare_calculation']['expected_fare']:.2f}" if result['fare_calculation']['expected_fare'] is not None else "N/A for Tour Fares",
                 f"{result['fare_calculation']['calculated_fare_total']:.2f}"
             ]
         }
@@ -153,13 +157,83 @@ if analyze_button and pattern_input:
         
         # Create a pie chart of fare components
         fig, ax = plt.subplots(figsize=(10, 6))
-        components = ['Journey Fares', 'Q Surcharges']
-        values = [result['fare_calculation']['total_journey_fare'], result['fare_calculation']['q_surcharge']]
-        colors = ['#4CAF50', '#FFC107']
+        components = ['Journey Fares', 'Q Surcharges', 'Class Differentials', 'Plus Up']
+        values = [
+            result['fare_calculation']['total_journey_fare'], 
+            result['fare_calculation']['q_surcharge'],
+            result['fare_calculation'].get('class_differential', 0.00),
+            result['fare_calculation'].get('plus_up', 0.00)
+        ]
+        colors = ['#4CAF50', '#FFC107', '#2196F3', '#9C27B0']
         
-        plt.pie(values, labels=components, colors=colors, autopct='%1.1f%%', startangle=90)
-        plt.axis('equal')
-        st.pyplot(fig)
+        # Add explanation for tour fares if present
+        if result['fare_calculation'].get('tour_indicators', []):
+            tour_indicators = result['fare_calculation'].get('tour_indicators', [])
+            tour_description = ", ".join(tour_indicators)
+            st.markdown(f'<div class="highlight">🛫 Tour fare indicators present: {tour_description}</div>', unsafe_allow_html=True)
+            
+            # Add more detailed explanations for tour indicators
+            st.markdown("""
+            **About Tour Indicators:**
+            
+            Tour indicators in fare calculations identify special tour fares that have different pricing and validation rules:
+            
+            - **M/BT (Bulk Tour)**: 
+              - Used for contracted bulk tour fares with specific negotiated rates
+              - May not include explicit fare amounts in segments
+              - Often has special validation exemptions
+            
+            - **M/IT (Inclusive Tour)**: 
+              - Used for inclusive tour packages that combine airfare with accommodations or other services
+              - Requires specific validation through tour codes or endorsements
+              - Often has special ticketing time limits
+              
+            When these indicators are present, the fare validation may be more lenient as they follow different fare rules.
+            """)
+            
+            # Add side trip explanation after the tour indicators explanation
+            if result['fare_calculation'].get('side_trips', []):
+                side_trips = result['fare_calculation'].get('side_trips', [])
+                side_trip_description = ", ".join(side_trips)
+                st.markdown(f'<div class="highlight">🛫 Side trips present: {side_trip_description}</div>', unsafe_allow_html=True)
+                
+                # Add more detailed explanations for side trips
+                st.markdown("""
+                **About Side Trips:**
+                
+                Side trips in fare calculations represent deviations from the main route:
+                
+                - **One-way with first segment as surface transportation**: 
+                  - Format: `BRU(/-AMS 6X BRU53.20)`
+                  - Surface transport to first city, then flight back to origin
+                
+                - **One-way with second segment as surface transportation**:
+                  - Format: `BRU(6X AMS53.20/-BRU)`
+                  - Flight to destination, then surface transport back to origin
+                
+                - **Round trip side trips**:
+                  - Format: `BRU(6X AMS 6X BRU106.40)`
+                  - Complete round trip by air from the main route point
+                
+                Side trips are priced separately from the main journey and are enclosed in parentheses.
+                """)
+            
+        # Filter out zero values
+        non_zero_components = []
+        non_zero_values = []
+        non_zero_colors = []
+        for i, value in enumerate(values):
+            if value > 0:
+                non_zero_components.append(components[i])
+                non_zero_values.append(value)
+                non_zero_colors.append(colors[i])
+        
+        if non_zero_values:
+            plt.pie(non_zero_values, labels=non_zero_components, colors=non_zero_colors, autopct='%1.1f%%', startangle=90)
+            plt.axis('equal')
+            st.pyplot(fig)
+        else:
+            st.write("No fare components to display")
         plt.close()
 
 elif analyze_button and not pattern_input:

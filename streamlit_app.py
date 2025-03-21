@@ -122,12 +122,13 @@ if analyze_button and pattern_input:
         
         # Create a DataFrame for fare details
         fare_data = {
-            "Component": ["Journey Fares", "Q Surcharge", "Total Journey Fare", "Expected Fare", "Calculated Fare Total"],
+            "Component": ["Journey Fares", "Q Surcharge", "Plus Up", "Total Journey Fare", "Expected Fare", "Calculated Fare Total"],
             "Value": [
                 ", ".join([f"{fare:.2f}" for fare in result['fare_calculation']['journey_fares']]),
                 f"{result['fare_calculation']['q_surcharge']:.2f}",
+                f"{result['fare_calculation'].get('plus_up', 0.00):.2f}",
                 f"{result['fare_calculation']['total_journey_fare']:.2f}",
-                f"{result['fare_calculation']['expected_fare']:.2f}",
+                f"{result['fare_calculation']['expected_fare']:.2f}" if result['fare_calculation']['expected_fare'] is not None else "N/A",
                 f"{result['fare_calculation']['calculated_fare_total']:.2f}"
             ]
         }
