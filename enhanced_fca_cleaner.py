@@ -77,6 +77,14 @@ def is_valid_token(token):
     if re.match(r'^\d+(\.\d+)?$', token):
         return True, "FARE"
     
+    # Check if token is a city pair (6-character code like LONBOM)
+    if re.match(r'^[A-Z]{6}$', token):
+        # Check if this is a valid city pair (both parts are airport codes)
+        first_airport = token[:3]
+        second_airport = token[3:]
+        if first_airport in AIRPORT_CODES and second_airport in AIRPORT_CODES:
+            return True, "CITY_PAIR"
+    
     # Check if token is a fare amount with M prefix (mileage fare, e.g. M123.45)
     if re.match(r'^M\d+(\.\d+)?$', token):
         return True, "MILEAGE_FARE"
@@ -86,11 +94,11 @@ def is_valid_token(token):
         return True, "Q_SURCHARGE"
     
     # Check if token is a plus up amount (e.g. P10.00)
-    if re.match(r'^P\d+(\.\d+)?$', token):
+    if token.startswith("P") and re.match(r'^P\d+(\.\d+)?$', token):
         return True, "PLUS_UP"
     
     # Check if token is a class differential (e.g. D10.00)
-    if re.match(r'^D\d+(\.\d+)?$', token):
+    if token.startswith("D") and re.match(r'^D\d+(\.\d+)?$', token):
         return True, "CLASS_DIFFERENTIAL"
     
     # Check if token is a valid currency code (e.g. USD, GBP)
@@ -99,8 +107,9 @@ def is_valid_token(token):
     
     # Check for valid keywords
     keywords = [
-        "X/", "O/", "Q", "NUC", "END", "/-",
-        "FARE", "TX", "XF", "XT", "YQ", "YR"
+        "X/", "O/", "Q", "NUC", "END", "/-", "//",
+        "FARE", "TX", "XF", "XT", "YQ", "YR",
+        "D", "P"  # Add D and P as valid keywords
     ]
     
     if token in keywords:
@@ -147,6 +156,18 @@ def split_concatenated_tokens(token):
     # Special handling for plus up indicator (P)
     if token == "P":
         return [token]
+    
+    # Special handling for class differential indicator (D)
+    if token == "D":
+        return [token]
+    
+    # Special handling for city pairs associated with D or P (6-char codes like LONBOM)
+    if re.match(r'^[A-Z]{6}$', token):
+        # Check if this is a valid city pair (both parts are airport codes)
+        first_airport = token[:3]
+        second_airport = token[3:]
+        if first_airport in AIRPORT_CODES and second_airport in AIRPORT_CODES:
+            return [token]  # Preserve as a single token
     
     # Special handling for parentheses (side trip indicators)
     if token == "(" or token == ")":
@@ -650,10 +671,16 @@ def validate_pattern_structure(pattern):
         elif token == ")" and in_side_trip:
             in_side_trip = False
             current_side_trip.append(")")
+            # Store the complete side trip
             side_trips.append(' '.join(current_side_trip))
             current_side_trip = []
         elif in_side_trip:
-            current_side_trip.append(token)
+            # Handle surface transportation markers within side trips
+            if token in ["//", "/-"]:
+                # Mark these as valid tokens within side trips
+                current_side_trip.append(token)
+            else:
+                current_side_trip.append(token)
     
     # Check for unbalanced parentheses
     if in_side_trip:
@@ -747,6 +774,12 @@ def validate_pattern_structure(pattern):
             i += 3
             continue
         
+        # Check for class differential with city pair and amount separated
+        if token == "D" and i + 3 < end_index and tokens[i + 1] in AIRPORT_CODES and tokens[i + 2] in AIRPORT_CODES and re.match(r'^\d+(\.\d+)?$', tokens[i + 3]):
+            class_differentials.append(float(tokens[i + 3]))
+            i += 4
+            continue
+        
         # Check for class differential in format D10.00
         if token.startswith("D") and re.match(r'^D\d+(\.\d+)?$', token):
             d_value = float(token[1:])
@@ -764,6 +797,12 @@ def validate_pattern_structure(pattern):
         if token == "P" and i + 3 < end_index and tokens[i + 1] in AIRPORT_CODES and tokens[i + 2] in AIRPORT_CODES and re.match(r'^\d+(\.\d+)?$', tokens[i + 3]):
             plus_up_amounts.append(float(tokens[i + 3]))
             i += 4
+            continue
+        
+        # Check for plus up with city pair as combined code and amount
+        if token == "P" and i + 2 < end_index and re.match(r'^[A-Z]{6}$', tokens[i + 1]) and re.match(r'^\d+(\.\d+)?$', tokens[i + 2]):
+            plus_up_amounts.append(float(tokens[i + 2]))
+            i += 3
             continue
         
         # Check for plus up in format P10.00
@@ -1091,6 +1130,12 @@ def calculate_fare_total(pattern, journey_validation=None):
             if token == "P" and i + 3 < len(tokens) and tokens[i + 1] in AIRPORT_CODES and tokens[i + 2] in AIRPORT_CODES and re.match(r'^\d+(\.\d+)?$', tokens[i + 3]):
                 plus_up_amounts.append(float(tokens[i + 3]))
                 i += 4
+                continue
+            
+            # Check for plus up with city pair as combined code and amount
+            if token == "P" and i + 2 < len(tokens) and re.match(r'^[A-Z]{6}$', tokens[i + 1]) and re.match(r'^\d+(\.\d+)?$', tokens[i + 2]):
+                plus_up_amounts.append(float(tokens[i + 2]))
+                i += 3
                 continue
             
             # Check for plus up in format P10.00

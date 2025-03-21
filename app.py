@@ -96,10 +96,11 @@ example_patterns = {
     "Multi-segment journey with Q surcharges": "NYC AA X/ORD UA X/DEN AS SEA 250.00 // YVR AC X/YYZ Q25.00 BA LON Q50.00 AF X/CDG LH FRA 500.00 NUC 750.00 END ROE 1.25",
     "Pattern with plus up": "LON BA NYC 80.00 P LONNYC 20.00 NUC 100.00 END ROE1.25",
     "Pattern with mileage fares": "LON BA BKK TG SIN M1000.00 SQ JKT GA SYD M1800.00 P LONSIN 100.00 NUC 2900.00 END",
-    "Pattern with side trip": "LON BA NYC 80.00 (BA AMS) AF MAD 5.00 P LON NYC 5.00 NUC 90.00 END ROE1.25",
+    "Pattern with side trip": "BRU LH FRA 150.00 (LH AMS LH BRU 100.00) BA LON 200.00 NUC 450.00 END ROE1.0",
+    "One-way side trip with surface": "LON BA FRA 150.00 (/-AMS KL BRU 75.00) LH MUC 120.00 NUC 345.00 END ROE0.9",
     "Complex pattern with stopovers": "JFK AA X/DFW AS X/SEA BA LON M500.00 AF X/PAR LH X/FRA TK IST M750.00 EK X/DXB SQ SIN M900.00 NUC 2150.00 END ROE1.0",
     "Tour fare with class differential": "NYC DL X/ATL QR X/DOH EK DXB M/IT USD350.00 BKK TG HKT 100.00 NUC 450.00 END ROE1.0",
-    "Pattern with class differential": "LON BA NYC D25.00 AF PAR F50.00 LH FRA 75.00 NUC 150.00 END ROE0.8",
+    "Pattern with class differential": "LON BA NYC D LONNYC 25.00 AF PAR F 50.00 LH FRA 75.00 NUC 150.00 END ROE0.8",
     "Round trip with stopover": "NYC DL X/ATL O DL MIA 150.00 DL X/ATL DL NYC 150.00 NUC 300.00 END ROE1.0",
     "International with I- prefix": "I-FRA LH NYC 400.00 BA LON 200.00 NUC 600.00 END ROE0.85",
     "Pattern with multiple currencies": "NYC UA LON 250.00USD100.00 BA PAR EUR200.00 AF NYC 175.00 NUC 725.00 END ROE1.0",
@@ -161,8 +162,16 @@ with st.expander("Learn more about pattern types"):
     - Often used for complex international routings
     
     **Pattern with side trip**
-    - Contains a segment enclosed in parentheses, indicating a deviation from the main journey
+    - Contains a segment enclosed in parentheses, representing a round-trip deviation from the main journey
+    - Format: `Origin Airline Stopover Fare (Airline SideTrip Airline Origin SideTrip_Fare) Airline Destination MainFare`
+    - Example: `BRU LH FRA 150.00 (LH AMS LH BRU 100.00) BA LON 200.00`
     - Side trips are priced separately and added to the total fare
+    
+    **One-way side trip with surface transportation**
+    - Includes surface transportation marker (/-) indicating non-flight segment
+    - Format: `Origin Airline Destination Fare (/-SurfaceOrigin Airline SurfaceDestination SideTrip_Fare)`
+    - Example: `LON BA FRA 150.00 (/-AMS KL BRU 75.00)`
+    - Combines flight and surface segments in a cohesive fare calculation
     
     **Complex pattern with stopovers**
     - Contains multiple X/ connection points and multiple carriers
