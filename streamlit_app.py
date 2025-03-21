@@ -88,19 +88,45 @@ example_patterns = {
     "Pattern with mileage fares": "LON BA BKK TG SIN M1000.00 SQ JKT GA SYD M1800.00 P LONSIN 100.00 NUC 2900.00 END",
     "Pattern with side trip": "LON BA NYC 80.00 (BA AMS) AF MAD 5.00 P LON NYC 5.00 NUC 90.00 END ROE1.25",
     "Complex pattern with stopovers": "JFK AA X/DFW AS X/SEA BA LON M500.00 AF X/PAR LH X/FRA TK IST M750.00 EK X/DXB SQ SIN M900.00 NUC 2150.00 END ROE1.0",
-    "Tour fare with class differential": "NYC DL X/ATL QR X/DOH EK DXB M/IT USD350.00 BKK TG HKT 100.00 NUC 450.00 END ROE1.0"
+    "Tour fare with class differential": "NYC DL X/ATL QR X/DOH EK DXB M/IT USD350.00 BKK TG HKT 100.00 NUC 450.00 END ROE1.0",
+    "Pattern with class differential": "LON BA NYC D25.00 AF PAR F50.00 LH FRA 75.00 NUC 150.00 END ROE0.8",
+    "Round trip with stopover": "NYC DL X/ATL O DL MIA 150.00 DL X/ATL DL NYC 150.00 NUC 300.00 END ROE1.0",
+    "International with I- prefix": "I-FRA LH NYC 400.00 BA LON 200.00 NUC 600.00 END ROE0.85",
+    "Pattern with multiple currencies": "NYC UA LON 250.00USD100.00 BA PAR EUR200.00 AF NYC 175.00 NUC 725.00 END ROE1.0",
+    "Mileage fares with Q surcharge": "SIN SQ BKK M250.00 Q30.00 TG HKG M300.00 CX TPE M200.00 Q25.00 NUC 805.00 END ROE1.0",
+    "Complex pattern with multiple side trips": "NYC AA CHI 100.00 (UA DEN UA LAS 50.00) UA LAX 150.00 (AS SEA AS PDX 75.00) AS NYC 200.00 NUC 575.00 END ROE1.0"
 }
 
-col1, col2 = st.columns(2)
+# Display examples in three columns
+col1, col2, col3 = st.columns(3)
+
+# Calculate items per column (round up to handle uneven distribution)
+total_examples = len(example_patterns)
+items_per_column = (total_examples + 2) // 3  # Using integer division with ceiling
+
+# Get list of items
+example_items = list(example_patterns.items())
+
+# First column
 with col1:
-    for i, (description, pattern) in enumerate(list(example_patterns.items())[:3]):
+    for i, (description, pattern) in enumerate(example_items[:items_per_column]):
         if st.button(f"Example {i+1}: {description}", key=f"example_{i+1}"):
             st.session_state.pattern_input = pattern
             st.experimental_rerun()
 
+# Second column
 with col2:
-    for i, (description, pattern) in enumerate(list(example_patterns.items())[3:]):
-        if st.button(f"Example {i+4}: {description}", key=f"example_{i+4}"):
+    for i, (description, pattern) in enumerate(example_items[items_per_column:2*items_per_column]):
+        idx = i + items_per_column + 1
+        if st.button(f"Example {idx}: {description}", key=f"example_{idx}"):
+            st.session_state.pattern_input = pattern
+            st.experimental_rerun()
+
+# Third column
+with col3:
+    for i, (description, pattern) in enumerate(example_items[2*items_per_column:]):
+        idx = i + 2*items_per_column + 1
+        if st.button(f"Example {idx}: {description}", key=f"example_{idx}"):
             st.session_state.pattern_input = pattern
             st.experimental_rerun()
 
@@ -133,6 +159,31 @@ with st.expander("Learn more about pattern types"):
     **Tour fare with class differential**
     - Contains M/IT or M/BT indicators for inclusive or bulk tours
     - May include class differential pricing for different cabin classes
+    
+    **Pattern with class differential**
+    - Uses letters like D, C, or F to indicate premium cabins (e.g., D for business, F for first class)
+    - Class differential amounts represent the price difference from economy class
+    
+    **Round trip with stopover**
+    - Uses O indicator to mark a stopover point
+    - Contains return segments with journey fare for both outbound and return
+    - Full round trip pricing structure
+    
+    **International with I- prefix**
+    - Begins with I- prefix indicating an international fare calculation
+    - Used primarily for international journeys with special fare rules
+    
+    **Pattern with multiple currencies**
+    - Contains fare amounts in different currencies (e.g., USD, EUR)
+    - Requires currency conversion to NUC (Neutral Units of Construction)
+    
+    **Mileage fares with Q surcharge**
+    - Combines mileage-based fares (M prefix) with Q surcharges
+    - Shows how different fare components can be combined
+    
+    **Complex pattern with multiple side trips**
+    - Contains multiple parenthesized segments representing different side trips
+    - Demonstrates complex fare construction with various deviations from the main route
     """)
 
 # Input form
